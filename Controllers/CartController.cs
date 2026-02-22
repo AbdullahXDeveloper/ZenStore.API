@@ -1,11 +1,13 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System;
 using ZenStore.API.Data;
 using ZenStore.API.Models;
+using System.Security.Claims;
 
 namespace ZenStore.API.Controllers;
 
+[Authorize]
 [Route("api/[controller]")]
 [ApiController]
 public class CartController : ControllerBase
@@ -18,19 +20,26 @@ public class CartController : ControllerBase
     }
 
     [HttpPost("add")]
+    [Authorize]
     public async Task<IActionResult> AddToCart(int productId)
     {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
         var product = await _context.products.FindAsync(productId);
         if (product == null)
             return NotFound("Product not found");
 
         var cart = await _context.Carts
             .Include(c => c.Items)
-            .FirstOrDefaultAsync();
+            .FirstOrDefaultAsync(c => c.userID == userId);
 
         if (cart == null)
         {
-            cart = new Cart();
+            cart = new Cart
+            {
+                userID = userId
+            };
+
             _context.Carts.Add(cart);
         }
 
@@ -54,13 +63,16 @@ public class CartController : ControllerBase
         return Ok("Added to cart");
     }
 
+    [Authorize]
     [HttpGet]
     public async Task<IActionResult> GetCart()
     {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
         var cart = await _context.Carts
             .Include(c => c.Items)
             .ThenInclude(i => i.Product)
-            .FirstOrDefaultAsync();
+            .FirstOrDefaultAsync(c => c.userID == userId);
 
         return Ok(cart);
     }
