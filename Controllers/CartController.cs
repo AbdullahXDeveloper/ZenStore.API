@@ -62,6 +62,65 @@ public class CartController : ControllerBase
         await _context.SaveChangesAsync();
         return Ok("Added to cart");
     }
+    [HttpPost("Delete")]
+    public async Task<IActionResult> DeleteCart(int productId)
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        var product = await _context.products.FindAsync(productId);
+        if (product == null)
+            return NotFound("Product not found");
+
+        var cart = await _context.Carts
+            .Include(c => c.Items)
+            .FirstOrDefaultAsync(c => c.userID == userId);
+
+        if (cart == null)
+        {
+            return NotFound("Cart is Empty");
+        }
+
+        var existingItem = cart.Items
+            .FirstOrDefault(i => i.ProductId == productId);
+
+        if (existingItem != null)
+            cart.Items.Remove(existingItem);
+        else
+        {
+            return Ok("Product Already Removed");
+        }
+
+        await _context.SaveChangesAsync();
+        return Ok("Removed from cart");
+    }
+
+    [HttpPost("decrease")]
+    public async Task<IActionResult> Decrease(int productId)
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        var cart = await _context.Carts
+            .Include(c => c.Items)
+            .FirstOrDefaultAsync(c => c.userID == userId);
+
+        if (cart == null)
+            return NotFound("Cart is Empty");
+
+        var existingItem = cart.Items
+            .FirstOrDefault(i => i.ProductId == productId);
+
+        if (existingItem == null)
+            return NotFound("Item not found");
+
+        if (existingItem.Quantity > 1)
+            existingItem.Quantity--;
+        else
+            cart.Items.Remove(existingItem);
+
+        await _context.SaveChangesAsync();
+        return Ok();
+    }
+
 
     [Authorize]
     [HttpGet]

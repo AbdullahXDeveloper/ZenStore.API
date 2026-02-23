@@ -13,48 +13,96 @@ namespace ZenStore.API.Controllers;
 public class AuthController : ControllerBase
 {
     private readonly UserManager<ApplicationUser> _userManager;
+    private readonly RoleManager<IdentityRole> _roleManager;
     private readonly IConfiguration _config;
 
-    public AuthController(UserManager<ApplicationUser> userManager, IConfiguration config)
+    public AuthController(
+        UserManager<ApplicationUser> userManager,
+        RoleManager<IdentityRole> roleManager,
+        IConfiguration config)
     {
         _userManager = userManager;
+        _roleManager = roleManager;
         _config = config;
     }
 
+    // ================= REGISTER =================
     [HttpPost("register")]
-    public async Task<IActionResult> Register(string email, string password)
+    public async Task<IActionResult> Register([FromBody] RegisterDto model)
     {
-        var user = new ApplicationUser { UserName = email, Email = email };
-        var result = await _userManager.CreateAsync(user, password);
+        if (!ModelState.IsValid)
+            return BadRequest(ModelState);
+
+        var user = new ApplicationUser
+        {
+            UserName = model.Email,
+            Email = model.Email
+        };
+
+        var result = await _userManager.CreateAsync(user, model.Password);
 
         if (!result.Succeeded)
             return BadRequest(result.Errors);
 
+        // ✅ default role = Customer
+        await _userManager.AddToRoleAsync(user, "Customer");
+
         return Ok("User Created");
     }
 
+    // ================= LOGIN =================
     [HttpPost("login")]
-    public async Task<IActionResult> Login(string email, string password)
+    public async Task<IActionResult> Login([FromBody] RegisterDto model)
+    {
+        var user = await _userManager.FindByEmailAsync(model.Email);
+
+        if (user == null || !await _userManager.CheckPasswordAsync(user, model.Password))
+            return Unauthorized("Invalid email or password");
+
+        var token = await GenerateJwtToken(user);
+
+        return Ok(new
+        {
+            token,
+            email = user.Email,
+            userId = user.Id
+        });
+    }
+
+    // ================= MAKE ADMIN (TEMP) =================
+    [HttpPost("make-admin")]
+    public async Task<IActionResult> MakeAdmin(string email)
     {
         var user = await _userManager.FindByEmailAsync(email);
 
-        if (user == null || !await _userManager.CheckPasswordAsync(user, password))
-            return Unauthorized();
+        if (user == null)
+            return NotFound("User not found");
 
-        var token = GenerateJwtToken(user);
+        await _userManager.AddToRoleAsync(user, "Admin");
 
-        return Ok(new { token });
+        return Ok("User promoted to Admin");
     }
 
-    private string GenerateJwtToken(ApplicationUser user)
+    // ================= JWT GENERATOR =================
+    private async Task<string> GenerateJwtToken(ApplicationUser user)
     {
-        var claims = new[]
+        var roles = await _userManager.GetRolesAsync(user);
+
+        var claims = new List<Claim>
         {
             new Claim(ClaimTypes.NameIdentifier, user.Id),
             new Claim(ClaimTypes.Email, user.Email)
         };
 
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]));
+        foreach (var role in roles)
+        {
+            claims.Add(new Claim(ClaimTypes.Role, role));
+        }
+
+        var key = new SymmetricSecurityKey(
+            Encoding.UTF8.GetBytes(_config["Jwt:Key"])
+        );
+
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
         var token = new JwtSecurityToken(
